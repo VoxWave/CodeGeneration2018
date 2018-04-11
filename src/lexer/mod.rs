@@ -10,16 +10,27 @@
 
 use num_bigint::BigInt;
 
+use common::Direction;
+
+/// Tokens are lexical units of code such as identifiers, keywords, operators etc.
 struct Token {
+    /// token_type is the type of the token such as an identifier, keyword, operator etc.
     token_type: TokenType,
+    /// line is the line in which the token is located in the source code.
     line: usize,
+    /// column is a tuple that that contains in which colums the token is located in the source code.
+    /// the first element of the tuple is the colum from which the token begins and the second element is where token ends.
     column: (usize, usize),
 }
+
 
 enum TokenType {
     Identifier(String),
     Literal(Literal),
     Operator(Operator),
+    SemiColon,
+    Assignment,
+    Bracket(Direction),  
 }
 
 enum Literal {
@@ -31,14 +42,24 @@ enum Literal {
 enum Operator {
     Plus,
     Minus,
-    Mul,
-    Equals,
-}
-
-enum KeyWord {
+    Mult,
+    Div,
+    Mod,
+    // Or, And, and Not are keywords however since they are also operators I put them here for convenience.
+    // They will be handled in the keyword recognizing part of the lexer however.
     Or,
     And,
     Not,
+    //
+    Eq,
+    NEq,
+    Gt,
+    GEq,
+    Lt,
+    LEq,
+}
+
+enum KeyWord {
     If,
     Then,
     Else,

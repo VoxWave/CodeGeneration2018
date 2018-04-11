@@ -11,6 +11,7 @@ extern crate num;
 extern crate num_bigint;
 extern crate rayon;
 
+mod common;
 mod lexer;
 mod parser;
 mod semantic_analysis;
