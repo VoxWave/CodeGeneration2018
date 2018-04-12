@@ -12,10 +12,10 @@ extern crate num_bigint;
 extern crate rayon;
 
 mod common;
-mod lexer;
-mod parser;
-mod semantic_analysis;
-mod code_generation;
+pub mod lexer;
+pub mod parser;
+pub mod semantic_analysis;
+pub mod code_generation;
 
 fn main() {
     println!("Hello, world!");
