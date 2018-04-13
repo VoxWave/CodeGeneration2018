@@ -143,6 +143,10 @@ where
                 self.buffer.push(a);
                 State(Self::identifier_or_keyword)
             },
+            n if n.is_digit(10) => {
+                self.buffer.push(n);
+                State(Self::integer_or_real)
+            }
             _ => {},
         }
     }
