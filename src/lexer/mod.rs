@@ -100,6 +100,8 @@ where
 {
     buffer: String,
     tokens: &'a mut O,
+    line: usize,
+    column: usize,
 }
 
 pub fn lex<I, O>(characters: &mut I, tokens: &mut O)
@@ -119,13 +121,15 @@ where
         Lexer {
             buffer: String::new(),
             tokens,
+            line: 0,
+            column: 0,
         }
     }
 
     fn normal(&mut self, c: char) -> State<Self, char> {
         match c {
             // These individual characters correspond directly to some token
-            '+' | '-' | '*' | '/' | '%' | ';' | ',' | '.' => {
+            '+' | '-' | '*' | '/' | '%' | ';' | ',' | '.' | '(' | ')' | '[' | ']' => {
                 let token_type = match c {
                     '+' => Operator(Plus),
                     '-' => Operator(Minus),
@@ -139,20 +143,41 @@ where
                 };
                 State(Self::normal)
             },
+
+            '"' => State(Self::string),
+
+            '=' | '<' | '>' => {
+                self.buffer.push(c);
+                State(Self::logical_operator)
+            }
+
             a if a.is_alphabetic() && a.is_ascii() => {
                 self.buffer.push(a);
                 State(Self::identifier_or_keyword)
             },
+
             n if n.is_digit(10) => {
                 self.buffer.push(n);
                 State(Self::integer_or_real)
-            }
+            },
             _ => {},
         }
     }
 
     fn identifier_or_keyword(&mut self, c: char) -> State<Self, char> {
         State(Self::identifier_or_keyword)
+    }
+
+    fn integer_or_real(&mut self, c: char) -> State<Self, char> {
+        State(Self::integer_or_real)
+    }
+
+    fn string(&mut self, c: char) -> State<Self, char> {
+        State(Self::string)
+    }
+
+    fn logical_operator(&mut self, c: char) -> State<Self, char> {
+        State(Self::logical_operator)
     }
 }
 
