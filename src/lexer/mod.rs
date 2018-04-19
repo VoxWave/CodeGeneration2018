@@ -151,6 +151,10 @@ where
                 State(Self::logical_operator)
             }
 
+            ':' => {
+                State(Self::assignment_or_colon)
+            },
+
             a if a.is_alphabetic() && a.is_ascii() => {
                 self.buffer.push(a);
                 State(Self::identifier_or_keyword)
@@ -178,6 +182,10 @@ where
 
     fn logical_operator(&mut self, c: char) -> State<Self, char> {
         State(Self::logical_operator)
+    }
+
+    fn assignment_or_colon(&mut self, c: char) -> State<Self, char> {
+        State(Self::assignment_or_colon)
     }
 }
 
