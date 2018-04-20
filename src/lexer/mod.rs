@@ -19,6 +19,15 @@ pub struct Token {
     position: Position,
 }
 
+impl Token {
+    fn new(token_type: TokenType, position: Position) -> Self {
+        Token {
+            token_type,
+            position,
+        }
+    }
+}
+
 pub struct Position {
     /// line is the line in which the token or error is located in the source code.
     line: usize,
@@ -101,7 +110,8 @@ where
     buffer: String,
     tokens: &'a mut O,
     line: usize,
-    column: usize,
+    current_column: usize,
+    starting_column: Option<usize>, 
 }
 
 pub fn lex<I, O>(characters: &mut I, tokens: &mut O)
@@ -122,7 +132,8 @@ where
             buffer: String::new(),
             tokens,
             line: 0,
-            column: 0,
+            current_column: 0,
+            starting_column: None,
         }
     }
 
@@ -139,8 +150,14 @@ where
                     ';' => SemiColon,
                     ',' => Comma,
                     '.' => Period,
+                    '(' => Bracket(Bracket::Normal, Direction::Left),
+                    ')' => Bracket(Bracket::Normal, Direction::Right),
+                    '[' => Bracket(Bracket::Square, Direction::Left),
+                    ']' => Bracket(Bracket::Square, Direction::Right),
                     _ => unreachable!(),
                 };
+                let position = self.get_current_position();
+                self.tokens.put(Ok(Token::new(token_type, position)));
                 State(Self::normal)
             },
 
@@ -164,7 +181,23 @@ where
                 self.buffer.push(n);
                 State(Self::integer_or_real)
             },
-            _ => {},
+
+            _ => {
+                let position = self.get_current_position();
+                self.tokens.put(Err(LexError::InvalidCharacter(position)));
+                State(Self::normal)
+            }
+        }
+    }
+
+    fn get_current_position(&self) -> Position {
+        let starting_column = match self.starting_column {
+            Some(n) => n,
+            None => self.current_column,
+        };
+        Position{
+            line: self.line,
+            column: (starting_column, self.current_column),
         }
     }
 
@@ -177,7 +210,24 @@ where
     }
 
     fn string(&mut self, c: char) -> State<Self, char> {
-        State(Self::string)
+        match c {
+            '\\' => State(Self::escape),
+            '"' => {
+                let token_type = Literal(Literal::String(self.buffer.clone()));
+                let position = self.get_current_position();
+                let token = Token::new(token_type, position);
+                self.tokens.put(Ok(token));
+                State(Self::normal) 
+            },
+            _ => {
+                self.buffer.push(c);
+                State(Self::string)
+            },
+        }
+    }
+
+    fn escape(&mut self, c: char) -> State<Self, char> {
+        State(Self::escape)
     }
 
     fn logical_operator(&mut self, c: char) -> State<Self, char> {
@@ -190,5 +240,6 @@ where
 }
 
 pub enum LexError {
-    InvalidEscape(usize, usize),
+    InvalidEscape(Position),
+    InvalidCharacter(Position),
 }
