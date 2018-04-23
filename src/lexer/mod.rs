@@ -108,6 +108,7 @@ where
     O: Sink<Result<Token, LexError>> + 'a
 {
     buffer: String,
+    escape_buffer: String,
     tokens: &'a mut O,
     line: usize,
     current_column: usize,
@@ -130,17 +131,20 @@ where
     fn new(tokens: &'a mut O) -> Self {
         Lexer {
             buffer: String::new(),
+            escape_buffer: String::new(),
             tokens,
-            line: 0,
+            line: 1,
             current_column: 0,
             starting_column: None,
         }
     }
 
     fn normal(&mut self, c: char) -> State<Self, char> {
+        self.current_column += 1;
         match c {
             // These individual characters correspond directly to some token
             '+' | '-' | '*' | '/' | '%' | ';' | ',' | '.' | '(' | ')' | '[' | ']' => {
+                // we match the character to a TokenType.
                 let token_type = match c {
                     '+' => Operator(Plus),
                     '-' => Operator(Minus),
@@ -156,23 +160,31 @@ where
                     ']' => Bracket(Bracket::Square, Direction::Right),
                     _ => unreachable!(),
                 };
+                // fetch the position of the token in the code.
                 let position = self.get_current_position();
+                // Create and output the token.
                 self.tokens.put(Ok(Token::new(token_type, position)));
+                // continue to the next character.
                 State(Self::normal)
             },
 
-            '"' => State(Self::string),
+            '"' => {
+                self.starting_column = Some(self.current_column);
+                State(Self::string)
+            },
 
             '=' | '<' | '>' => {
                 self.buffer.push(c);
                 State(Self::logical_operator)
-            }
+            },
 
             ':' => {
                 State(Self::assignment_or_colon)
             },
 
             a if a.is_alphabetic() && a.is_ascii() => {
+                // the character is a letter so the character is added to the buffer and
+                // and the state is changed to the the identifier and keyword handling one.
                 self.buffer.push(a);
                 State(Self::identifier_or_keyword)
             },
@@ -181,12 +193,106 @@ where
                 self.buffer.push(n);
                 State(Self::integer_or_real)
             },
+            
+            w if w.is_whitespace() => {
+                // newlines are a special case of whitespace since they affect line and 
+                // column counting.
+                self.check_newline(c);
+                // otherwise whitespaces are completely ignored.
+                State(Self::normal)
+            }
 
             _ => {
                 let position = self.get_current_position();
                 self.tokens.put(Err(LexError::InvalidCharacter(position)));
                 State(Self::normal)
             }
+        }
+    }
+
+
+    fn identifier_or_keyword(&mut self, c: char) -> State<Self, char> {
+        self.current_column += 1;
+        State(Self::identifier_or_keyword)
+    }
+
+    fn integer_or_real(&mut self, c: char) -> State<Self, char> {
+        self.current_column += 1;
+        State(Self::integer_or_real)
+    }
+
+    fn string(&mut self, c: char) -> State<Self, char> {
+        self.current_column += 1;
+        match c {
+            '\\' => State(Self::escape),
+            '"' => {
+                // The string has ended so create a new token out of the contents of the 
+                // buffer and put it into the token sink.
+                let token_type = Literal(Literal::String(self.buffer.clone()));
+                let position = self.get_current_position();
+                let token = Token::new(token_type, position);
+                self.tokens.put(Ok(token));
+
+                // Clean up the buffer and the starting column field since their contents
+                // are now essentially junk.
+                self.buffer.clear();
+                self.starting_column = None;
+
+                // Switch back to normal state.
+                State(Self::normal) 
+            },
+            _ => {
+                // The character not a special character so we add it to the buffer and 
+                // continue to the next character.
+                self.check_newline(c);
+                self.buffer.push(c);
+                State(Self::string)
+            },
+        }
+    }
+
+    fn some_escape(&mut self, c: char) -> State<Self, char> {
+        self.current_column += 1;
+        let escaped_char = match c {
+            'a' => '\x07',
+            'b' => '\x08',
+            'f' => '\x0C',
+            'n' => '\n',
+            'r' => '\r',
+            't' => '\t',
+            'v' => '\x0B',
+            '\\' | '\'' | '"' | '?' => c,
+            '0'...'8' | 'x' | 'U' | 'u' => {
+                // The escape is a multiline one so the character is stored and
+                // the state
+                self.escape_buffer.push(c);
+                return State(Self::multi_char_escape);
+            }
+            _ => panic!("Escape \\{:#?} not supported", c),
+        };
+        self.buffer.push(escaped_char);
+        self.escape_buffer.clear();
+        State(Self::string)
+    }
+
+    fn multi_char_escape(&mut self, c: char) -> State<Self, char> {
+        State(Self::multi_char_escape)
+    }
+
+    fn logical_operator(&mut self, c: char) -> State<Self, char> {
+        self.current_column += 1;
+        State(Self::logical_operator)
+    }
+
+    fn assignment_or_colon(&mut self, c: char) -> State<Self, char> {
+        self.current_column += 1;
+        State(Self::assignment_or_colon)
+    }
+
+    fn check_newline(&mut self, c: char) {
+        if c == '\n' {
+            self.line += 1;
+            self.current_column = 0;
         }
     }
 
@@ -199,43 +305,6 @@ where
             line: self.line,
             column: (starting_column, self.current_column),
         }
-    }
-
-    fn identifier_or_keyword(&mut self, c: char) -> State<Self, char> {
-        State(Self::identifier_or_keyword)
-    }
-
-    fn integer_or_real(&mut self, c: char) -> State<Self, char> {
-        State(Self::integer_or_real)
-    }
-
-    fn string(&mut self, c: char) -> State<Self, char> {
-        match c {
-            '\\' => State(Self::escape),
-            '"' => {
-                let token_type = Literal(Literal::String(self.buffer.clone()));
-                let position = self.get_current_position();
-                let token = Token::new(token_type, position);
-                self.tokens.put(Ok(token));
-                State(Self::normal) 
-            },
-            _ => {
-                self.buffer.push(c);
-                State(Self::string)
-            },
-        }
-    }
-
-    fn escape(&mut self, c: char) -> State<Self, char> {
-        State(Self::escape)
-    }
-
-    fn logical_operator(&mut self, c: char) -> State<Self, char> {
-        State(Self::logical_operator)
-    }
-
-    fn assignment_or_colon(&mut self, c: char) -> State<Self, char> {
-        State(Self::assignment_or_colon)
     }
 }
 
