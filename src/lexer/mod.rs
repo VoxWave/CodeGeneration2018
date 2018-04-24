@@ -262,11 +262,18 @@ where
             't' => '\t',
             'v' => '\x0B',
             '\\' | '\'' | '"' | '?' => c,
-            '0'...'8' | 'x' | 'U' | 'u' => {
+            '0'...'8' => {
+                self.buffer.push(c);
+                return State(Self::octal_escape)
+            } 
+            'x' | 'U' | 'u' => {
                 // The escape is a multiline one so the character is stored and
                 // the state
-                self.escape_buffer.push(c);
-                return State(Self::multi_char_escape);
+                return match c {
+                    'x' => State(Self::hex_escape),
+                    'U' => State(Self::eight_char_unicode_escape),
+                    'u' => State(Self::four_char_unicode_escape),
+                };
             }
             _ => panic!("Escape \\{:#?} not supported", c),
         };
@@ -275,7 +282,19 @@ where
         State(Self::string)
     }
 
-    fn multi_char_escape(&mut self, c: char) -> State<Self, char> {
+    fn octal_escape(&mut self, c: char) -> State<Self, char> {
+        State(Self::multi_char_escape)
+    }
+
+    fn hex_escape(&mut self, c: char) -> State<Self, char> {
+        State(Self::multi_char_escape)
+    }
+
+    fn eight_char_unicode_escape(&mut self, c: char) -> State<Self, char> {
+        State(Self::multi_char_escape)
+    }
+    
+    fn four_char_unicode_escape(&mut self, c: char) -> State<Self, char> {
         State(Self::multi_char_escape)
     }
 
