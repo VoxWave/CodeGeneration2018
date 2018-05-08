@@ -168,6 +168,7 @@ where
                 State(Self::normal)
             },
 
+            // We're expecting a string. Set the starting column to this point and enter string scanning.
             '"' => {
                 self.starting_column = Some(self.current_column);
                 State(Self::string)
@@ -182,9 +183,9 @@ where
                 State(Self::assignment_or_colon)
             },
 
+            // The character is a letter so the character is added to the buffer and
+            // and the state is changed to the the identifier and keyword handling one.
             a if a.is_alphabetic() && a.is_ascii() => {
-                // the character is a letter so the character is added to the buffer and
-                // and the state is changed to the the identifier and keyword handling one.
                 self.buffer.push(a);
                 State(Self::identifier_or_keyword)
             },
@@ -224,7 +225,7 @@ where
     fn string(&mut self, c: char) -> State<Self, char> {
         self.current_column += 1;
         match c {
-            '\\' => State(Self::escape),
+            '\\' => State(Self::some_escape),
             '"' => {
                 // The string has ended so create a new token out of the contents of the 
                 // buffer and put it into the token sink.
@@ -254,6 +255,7 @@ where
     fn some_escape(&mut self, c: char) -> State<Self, char> {
         self.current_column += 1;
         let escaped_char = match c {
+            // These are single character escapes so the corresponding character can be matched for these
             'a' => '\x07',
             'b' => '\x08',
             'f' => '\x0C',
@@ -262,13 +264,16 @@ where
             't' => '\t',
             'v' => '\x0B',
             '\\' | '\'' | '"' | '?' => c,
-            '0'...'8' => {
-                self.buffer.push(c);
+            // Theśe are multicharacter escapes so we need to transition to a different state to handle them.
+            // With octal escapes the first character after the backslash is part of the octal we are parsing 
+            // so we need save the character in the buffer before we do a state transition. 
+            '0'...'7' => {
+                self.escape_buffer.push(c);
                 return State(Self::octal_escape)
             } 
+            // With hex and unicode the first character is not needed in the parsing of the escape we only need
+            // to do a state transition.
             'x' | 'U' | 'u' => {
-                // The escape is a multiline one so the character is stored and
-                // the state
                 return match c {
                     'x' => State(Self::hex_escape),
                     'U' => State(Self::eight_char_unicode_escape),
@@ -277,25 +282,83 @@ where
             }
             _ => panic!("Escape \\{:#?} not supported", c),
         };
+        // The escape has been handled. Push the character to the buffer and go back to string lexing state.
         self.buffer.push(escaped_char);
         self.escape_buffer.clear();
         State(Self::string)
     }
 
+    //TODO: The multicharacter escape functions look really similar so I should figure out a way to
+    // do code reuse. possibly a function.
     fn octal_escape(&mut self, c: char) -> State<Self, char> {
-        State(Self::multi_char_escape)
+        let mut stop = false;
+        match c {
+            '0'...'7' => self.escape_buffer.push(c),
+            _ => stop = true,
+        }
+
+        if self.escape_buffer.len() == 3 || stop {
+            let escaped = u8::from_str_radix(&self.escape_buffer[..], 8);
+            match escaped {
+                Ok(chr) => self.buffer.push(chr as char),
+                Err(e) => self.send_escape_error(format!("Parsing an octal escape failed. An IntParseError occured: {:?}", e)),
+            }
+            self.escape_buffer.clear();
+            match stop {
+                true => self.string(c),
+                false => State(Self::string),
+            }
+        } else {
+            State(Self::octal_escape)
+        }
     }
 
     fn hex_escape(&mut self, c: char) -> State<Self, char> {
-        State(Self::multi_char_escape)
+        let stop = false;
+        match c {
+            '0'...'9' | 'A'...'F' | 'a'...'f' => self.escape_buffer.push(c),
+            _ => stop = true,
+        }
+        if self.escape_buffer.len() == 2 || stop {
+            let escaped = u8::from_str_radix(&self.escape_buffer[..], 16);
+            match escaped {
+                Ok(chr) => self.buffer.push(chr as char),
+                Err(e) => self.send_escape_error(format!("Parsing an hex escape failed. An IntParseError occured: {:?}", e), ),
+            }
+            self.escape_buffer.clear();
+            match stop {
+                true => self.string(c),
+                false => State(Self::string),
+            }
+        } else {
+            State(Self::hex_escape)
+        }
     }
 
     fn eight_char_unicode_escape(&mut self, c: char) -> State<Self, char> {
+        match c {
+            '0'...'9' | 'A'...'F' | 'a'...'f' => self.escape_buffer.push(c),
+            _ => {
+                self.send_escape_error(format!("Parsing and 8 char unicode escape failed. {} is not a valid hex digit.", c));
+                return State(Self::string);
+            },
+            if self.escape_buffer.len() == 8 {
+                u32::from_str_radix(&self.escape_buffer[..], 16)
+            }
+        }
+        if
         State(Self::multi_char_escape)
     }
     
     fn four_char_unicode_escape(&mut self, c: char) -> State<Self, char> {
         State(Self::multi_char_escape)
+    }
+
+    fn send_escape_error(&mut self, message: String) {
+        let position = self.get_current_position();
+        let error = Err(LexError::InvalidEscape(position, message));
+        self.tokens.put(error);
+        self.escape_buffer.clear();
     }
 
     fn logical_operator(&mut self, c: char) -> State<Self, char> {
@@ -328,6 +391,6 @@ where
 }
 
 pub enum LexError {
-    InvalidEscape(Position),
+    InvalidEscape(Position, String),
     InvalidCharacter(Position),
 }
