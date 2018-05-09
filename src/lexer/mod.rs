@@ -4,6 +4,7 @@
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use std::num::ParseIntError;
 use common::{State, run_machine};
 use common::{Source, Sink};
 use common::Direction;
@@ -289,7 +290,7 @@ where
     }
 
     //TODO: The multicharacter escape functions look really similar so I should figure out a way to
-    // do code reuse. possibly a function.
+    // do code reuse. possibly a function.z
     fn octal_escape(&mut self, c: char) -> State<Self, char> {
         let mut stop = false;
         match c {
@@ -323,7 +324,11 @@ where
             let escaped = u8::from_str_radix(&self.escape_buffer[..], 16);
             match escaped {
                 Ok(chr) => self.buffer.push(chr as char),
-                Err(e) => self.send_escape_error(format!("Parsing an hex escape failed. An IntParseError occured: {:?}", e), ),
+                Err(e) => self.send_escape_error(
+                    format!(
+                        "Parsing an hex escape failed. An IntParseError occured: {:?}", e
+                    ), 
+                ),
             }
             self.escape_buffer.clear();
             match stop {
@@ -339,19 +344,45 @@ where
         match c {
             '0'...'9' | 'A'...'F' | 'a'...'f' => self.escape_buffer.push(c),
             _ => {
-                self.send_escape_error(format!("Parsing and 8 char unicode escape failed. {} is not a valid hex digit.", c));
+                self.send_escape_error(
+                    format!("Parsing and 8 char unicode escape failed. {} is not a valid hex digit.", c)
+                );
                 return State(Self::string);
             },
-            if self.escape_buffer.len() == 8 {
-                u32::from_str_radix(&self.escape_buffer[..], 16)
-            }
         }
-        if
-        State(Self::multi_char_escape)
+        if self.escape_buffer.len() == 8 {
+            match self.parse_unicode_escape_from_string() {
+                Ok(chara) => {
+                    self.buffer.push(chara);
+                    self.escape_buffer.clear();
+                }
+                Err(err) => {
+                    self.tokens.put(err);
+                    self.escape_buffer.clear();
+                }
+            };
+            State(Self::string)
+        } else {
+            State(Self::eight_char_unicode_escape)
+        }
     }
     
     fn four_char_unicode_escape(&mut self, c: char) -> State<Self, char> {
-        State(Self::multi_char_escape)
+        State(Self::four_char_unicode_escape)
+    }
+
+    fn parse_unicode_escape_from_string(&mut self) -> Result<char, LexError> {
+        let u32::from_str_radix(&self.escape_buffer[..], 16);
+        match number {
+            Ok(number) => number,
+            Err(err) => LexError::InvalidEscape (
+                self.get_current_position(),
+                format!(
+                    "Error parsing an 8 char unicode escape. Could not convert the",
+
+                ),
+            ),
+        }
     }
 
     fn send_escape_error(&mut self, message: String) {
