@@ -3,8 +3,8 @@
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+use std::char::from_u32;
 
-use std::num::ParseIntError;
 use common::{State, run_machine};
 use common::{Source, Sink};
 use common::Direction;
@@ -279,9 +279,15 @@ where
                     'x' => State(Self::hex_escape),
                     'U' => State(Self::eight_char_unicode_escape),
                     'u' => State(Self::four_char_unicode_escape),
+                    _ => unreachable!(),
                 };
             }
-            _ => panic!("Escape \\{:#?} not supported", c),
+            _ => {
+                self.tokens.put(Err(LexError::InvalidEscape(
+                    self.get_current_position(),
+                    format!()
+                )));
+            },
         };
         // The escape has been handled. Push the character to the buffer and go back to string lexing state.
         self.buffer.push(escaped_char);
@@ -357,7 +363,7 @@ where
                     self.escape_buffer.clear();
                 }
                 Err(err) => {
-                    self.tokens.put(err);
+                    self.tokens.put(Err(err));
                     self.escape_buffer.clear();
                 }
             };
@@ -372,15 +378,27 @@ where
     }
 
     fn parse_unicode_escape_from_string(&mut self) -> Result<char, LexError> {
-        let u32::from_str_radix(&self.escape_buffer[..], 16);
-        match number {
+        let number = match u32::from_str_radix(&self.escape_buffer[..], 16) {
             Ok(number) => number,
-            Err(err) => LexError::InvalidEscape (
-                self.get_current_position(),
-                format!(
-                    "Error parsing an 8 char unicode escape. Could not convert the",
-
-                ),
+            Err(err) => return Err(
+                    LexError::InvalidEscape(
+                        self.get_current_position(),
+                        format!(
+                            "Error parsing an 8 char unicode escape. Could not convert the escape into an integer. {:?}",
+                            err,
+                        ),
+                    )
+            ),
+        };
+        match from_u32(number) {
+            Some(chara) => Ok(chara),
+            None => return Err(
+                LexError::InvalidEscape(
+                    self.get_current_position(),
+                    format!(
+                        "Error parsing an 8 char unicode escape. Escape value is not valid unicode."
+                    ),
+                )
             ),
         }
     }
