@@ -113,7 +113,7 @@ where
     tokens: &'a mut O,
     line: usize,
     current_column: usize,
-    starting_column: Option<usize>, 
+    starting_column: Option<usize>,
 }
 
 pub fn lex<I, O>(characters: &mut I, tokens: &mut O)
@@ -283,10 +283,12 @@ where
                 };
             }
             _ => {
+                let position = self.get_current_position();
                 self.tokens.put(Err(LexError::InvalidEscape(
-                    self.get_current_position(),
-                    format!()
+                    position,
+                    format!("\\{}", c),
                 )));
+                return State(Self::string);
             },
         };
         // The escape has been handled. Push the character to the buffer and go back to string lexing state.
@@ -321,7 +323,7 @@ where
     }
 
     fn hex_escape(&mut self, c: char) -> State<Self, char> {
-        let stop = false;
+        let mut stop = false;
         match c {
             '0'...'9' | 'A'...'F' | 'a'...'f' => self.escape_buffer.push(c),
             _ => stop = true,
@@ -374,20 +376,43 @@ where
     }
     
     fn four_char_unicode_escape(&mut self, c: char) -> State<Self, char> {
-        State(Self::four_char_unicode_escape)
+        match c {
+            '0'...'9' | 'A'...'F' | 'a'...'f' => self.escape_buffer.push(c),
+            _ => {
+                self.send_escape_error(
+                    format!("Parsing and 8 char unicode escape failed. {} is not a valid hex digit.", c)
+                );
+                return State(Self::string);
+            },
+        }
+        if self.escape_buffer.len() == 4 {
+            match self.parse_unicode_escape_from_string() {
+                Ok(chara) => {
+                    self.buffer.push(chara);
+                    self.escape_buffer.clear();
+                }
+                Err(err) => {
+                    self.tokens.put(Err(err));
+                    self.escape_buffer.clear();
+                }
+            };
+            State(Self::string)
+        } else {
+            State(Self::eight_char_unicode_escape)
+        }
     }
 
     fn parse_unicode_escape_from_string(&mut self) -> Result<char, LexError> {
         let number = match u32::from_str_radix(&self.escape_buffer[..], 16) {
             Ok(number) => number,
             Err(err) => return Err(
-                    LexError::InvalidEscape(
-                        self.get_current_position(),
-                        format!(
-                            "Error parsing an 8 char unicode escape. Could not convert the escape into an integer. {:?}",
-                            err,
-                        ),
-                    )
+                LexError::InvalidEscape(
+                    self.get_current_position(),
+                    format!(
+                        "Error parsing an unicode escape. Could not convert the escape into an integer. {:?}",
+                        err,
+                    ),
+                )
             ),
         };
         match from_u32(number) {
@@ -396,7 +421,7 @@ where
                 LexError::InvalidEscape(
                     self.get_current_position(),
                     format!(
-                        "Error parsing an 8 char unicode escape. Escape value is not valid unicode."
+                        "Error parsing an unicode escape. Escape value is not valid unicode."
                     ),
                 )
             ),

@@ -4,7 +4,3 @@ version = "0.1.0"
 authors = ["Your Name <victor_bankowski@hotmail.com>"]
 
 [dependencies]
-num-bigint = "0.1.43"
-num-traits = "0.2.0"
-num = "0.1.42"
-rayon = "1.0.1"
