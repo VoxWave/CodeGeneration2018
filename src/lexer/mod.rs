@@ -39,6 +39,7 @@ pub struct Position {
 }
 
 enum TokenType {
+    KeyWord(KeyWord),
     Identifier(String),
     Literal(Literal),
     Operator(Operator),
@@ -139,7 +140,8 @@ where
             starting_column: None,
         }
     }
-
+    /// normal is the default state of the lexer. It outputs tokens for single character tokens 
+    /// and for multi char tokens it does some preparations and switches to the approriate state.
     fn normal(&mut self, c: char) -> State<Self, char> {
         self.current_column += 1;
         match c {
@@ -152,6 +154,7 @@ where
                     '*' => Operator(Mult),
                     '/' => Operator(Div),
                     '%' => Operator(Mod),
+                    '=' => Operator(Eq),
                     ';' => SemiColon,
                     ',' => Comma,
                     '.' => Period,
@@ -175,12 +178,17 @@ where
                 State(Self::string)
             },
 
-            '=' | '<' | '>' => {
+            // We're expecting some comparative operator. We can't tell yet if it's a single character one
+            // or a two character one so we push the current character to the buffer and switch to the
+            // approriate state.
+            '<' | '>' => {
                 self.buffer.push(c);
-                State(Self::logical_operator)
+                self.starting_column = Some(self.current_column);
+                State(Self::comparative_operator)
             },
 
             ':' => {
+                self.starting_column = Some(self.current_column);
                 State(Self::assignment_or_colon)
             },
 
@@ -188,11 +196,13 @@ where
             // and the state is changed to the the identifier and keyword handling one.
             a if a.is_alphabetic() && a.is_ascii() => {
                 self.buffer.push(a);
+                self.starting_column = Some(self.current_column);
                 State(Self::identifier_or_keyword)
             },
 
             n if n.is_digit(10) => {
                 self.buffer.push(n);
+                self.starting_column = Some(self.current_column);
                 State(Self::integer_or_real)
             },
             
@@ -212,15 +222,100 @@ where
         }
     }
 
-
     fn identifier_or_keyword(&mut self, c: char) -> State<Self, char> {
-        self.current_column += 1;
-        State(Self::identifier_or_keyword)
+        match c {
+            a if (a.is_alphabetic() && a.is_ascii()) || a == '_' || a.is_digit(10) => {
+                self.current_column += 1; 
+                self.buffer.push(c);
+                State(Self::identifier_or_keyword)
+            },
+            _ => {
+                let token = self.parse_keyword_or_identifier();
+                self.tokens.put(Ok(token));
+                self.normal(c)
+            },
+        }
+    }
+
+    fn parse_keyword_or_identifier(&mut self) -> Token {
+        use self::KeyWord::*;
+        let token_type = match &*self.buffer {
+            "or" => TokenType::Operator(Or),
+            "and" => TokenType::Operator(And),
+            "not" => TokenType::Operator(Not),
+            "if" => TokenType::KeyWord(If),
+            "then" => TokenType::KeyWord(Then),
+            "else" => TokenType::KeyWord(Else),
+            "of" => TokenType::KeyWord(Of),
+            "while" => TokenType::KeyWord(While),
+            "do" => TokenType::KeyWord(Do),
+            "begin" => TokenType::KeyWord(Begin),
+            "end" => TokenType::KeyWord(End),
+            "var" => TokenType::KeyWord(Var),
+            "array" => TokenType::KeyWord(Array),
+            "procedure" => TokenType::KeyWord(Procedure),
+            "function" => TokenType::KeyWord(Function),
+            "program" => TokenType::KeyWord(Program),
+            "assert" => TokenType::KeyWord(Assert),
+            "return" => TokenType::KeyWord(Return),
+            _ => TokenType::Identifier(self.buffer.clone()),
+        };
+        self.buffer.clear();
+        let position = self.get_current_position();
+        self.starting_column = None;
+        Token::new(token_type, position)
     }
 
     fn integer_or_real(&mut self, c: char) -> State<Self, char> {
-        self.current_column += 1;
-        State(Self::integer_or_real)
+        match c {
+            d if d.is_digit(10) => {
+                self.current_column += 1;
+                self.buffer.push(c);
+                State(Self::integer_or_real)
+            },
+
+            '.' => {
+                self.current_column += 1;
+                self.buffer.push(c);
+                State(Self::real)
+            },
+
+            _ => {
+                let position = self.get_current_position();
+                let integer = match i64::from_str_radix(&self.buffer, 10) {
+                    Ok(i) => i,
+                    Err(err) => {
+                        let message = format!("Parsing an integer literal failed. Error given by from_str_radix : {:?}", err);
+                        let error = LexError::IntegerLexError(position, message);
+                        self.tokens.put(Err(error));
+                        self.buffer.clear();
+                        self.starting_column = None;
+                        return self.normal(c);
+                    },
+                };
+                let token_type = TokenType::Literal(Literal::Integer(integer));
+                self.buffer.clear();
+
+                let position = self.get_current_position();
+                self.starting_column = None;
+                let token = Token::new(token_type, position);
+                self.tokens.put(Ok(token));
+                self.normal(c)
+            },
+        }
+    }
+
+    fn real(&mut self, c: char) -> State<Self, char> {
+        match c {
+            n if n.is_digit(10) || n == 'e' => {
+                self.current_column += 1;
+                self.buffer.push(c);
+                State(Self::real)
+            },
+            _ => {
+
+            }
+        }
     }
 
     fn string(&mut self, c: char) -> State<Self, char> {
@@ -357,6 +452,7 @@ where
     }
     
     fn char_unicode_escape(&mut self, c: char, char_amount: usize) -> State<Self, char> {
+        self.current_column += 1;
         match c {
             '0'...'9' | 'A'...'F' | 'a'...'f' => self.escape_buffer.push(c),
             _ => {
@@ -420,9 +516,9 @@ where
         self.escape_buffer.clear();
     }
 
-    fn logical_operator(&mut self, c: char) -> State<Self, char> {
+    fn comparative_operator(&mut self, c: char) -> State<Self, char> {
         self.current_column += 1;
-        State(Self::logical_operator)
+        State(Self::comparative_operator)
     }
 
     fn assignment_or_colon(&mut self, c: char) -> State<Self, char> {
@@ -452,4 +548,5 @@ where
 pub enum LexError {
     InvalidEscape(Position, String),
     InvalidCharacter(Position),
+    IntegerLexError(Position, String),
 }
