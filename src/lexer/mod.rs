@@ -348,34 +348,15 @@ where
         }
     }
 
+    fn four_char_unicode_escape(&mut self, c: char) -> State<Self, char> {
+        self.char_unicode_escape(c, 4)
+    }
+
     fn eight_char_unicode_escape(&mut self, c: char) -> State<Self, char> {
-        match c {
-            '0'...'9' | 'A'...'F' | 'a'...'f' => self.escape_buffer.push(c),
-            _ => {
-                self.send_escape_error(
-                    format!("Parsing and 8 char unicode escape failed. {} is not a valid hex digit.", c)
-                );
-                return State(Self::string);
-            },
-        }
-        if self.escape_buffer.len() == 8 {
-            match self.parse_unicode_escape_from_string() {
-                Ok(chara) => {
-                    self.buffer.push(chara);
-                    self.escape_buffer.clear();
-                }
-                Err(err) => {
-                    self.tokens.put(Err(err));
-                    self.escape_buffer.clear();
-                }
-            };
-            State(Self::string)
-        } else {
-            State(Self::eight_char_unicode_escape)
-        }
+        self.char_unicode_escape(c, 8)
     }
     
-    fn four_char_unicode_escape(&mut self, c: char) -> State<Self, char> {
+    fn char_unicode_escape(&mut self, c: char, char_amount: usize) -> State<Self, char> {
         match c {
             '0'...'9' | 'A'...'F' | 'a'...'f' => self.escape_buffer.push(c),
             _ => {
@@ -385,7 +366,7 @@ where
                 return State(Self::string);
             },
         }
-        if self.escape_buffer.len() == 4 {
+        if self.escape_buffer.len() == char_amount {
             match self.parse_unicode_escape_from_string() {
                 Ok(chara) => {
                     self.buffer.push(chara);
@@ -398,7 +379,11 @@ where
             };
             State(Self::string)
         } else {
-            State(Self::eight_char_unicode_escape)
+            match char_amount {
+                4 => State(Self::four_char_unicode_escape),
+                8 => State(Self::eight_char_unicode_escape),
+                _ => unreachable!(),
+            }
         }
     }
 
